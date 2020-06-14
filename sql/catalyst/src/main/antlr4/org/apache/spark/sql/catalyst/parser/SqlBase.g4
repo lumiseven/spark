@@ -30,12 +30,6 @@ grammar SqlBase;
   public boolean legacy_exponent_literal_as_decimal_enabled = false;
 
   /**
-   * When false, CREATE TABLE syntax without a provider will use
-   * the value of spark.sql.sources.default as its provider.
-   */
-  public boolean legacy_create_hive_table_by_default_enabled = false;
-
-  /**
    * Verify whether current token is a valid decimal token (which contains dot).
    * Returns true if the character that follows the token is not a digit or letter or underscore.
    *
@@ -123,12 +117,7 @@ statement
         (RESTRICT | CASCADE)?                                          #dropNamespace
     | SHOW (DATABASES | NAMESPACES) ((FROM | IN) multipartIdentifier)?
         (LIKE? pattern=STRING)?                                        #showNamespaces
-    | {!legacy_create_hive_table_by_default_enabled}?
-        createTableHeader ('(' colTypeList ')')? tableProvider?
-        createTableClauses
-        (AS? query)?                                                   #createTable
-    | {legacy_create_hive_table_by_default_enabled}?
-        createTableHeader ('(' colTypeList ')')? tableProvider
+    | createTableHeader ('(' colTypeList ')')? tableProvider
         createTableClauses
         (AS? query)?                                                   #createTable
     | createTableHeader ('(' columns=colTypeList ')')?
@@ -1020,6 +1009,7 @@ alterColumnAction
 // You can find the full keywords list by searching "Start of the keywords list" in this file.
 // The non-reserved keywords are listed below. Keywords not in this list are reserved keywords.
 ansiNonReserved
+//--ANSI-NON-RESERVED-START
     : ADD
     | AFTER
     | ALTER
@@ -1184,6 +1174,7 @@ ansiNonReserved
     | TRIM
     | TRUE
     | TRUNCATE
+    | TYPE
     | UNARCHIVE
     | UNBOUNDED
     | UNCACHE
@@ -1195,6 +1186,7 @@ ansiNonReserved
     | VIEW
     | VIEWS
     | WINDOW
+//--ANSI-NON-RESERVED-END
     ;
 
 // When `SQL_standard_keyword_behavior=false`, there are 2 kinds of keywords in Spark SQL.
@@ -1472,6 +1464,7 @@ nonReserved
 //============================
 // Start of the keywords list
 //============================
+//--SPARK-KEYWORD-LIST-START
 ADD: 'ADD';
 AFTER: 'AFTER';
 ALL: 'ALL';
@@ -1724,6 +1717,7 @@ WHERE: 'WHERE';
 WINDOW: 'WINDOW';
 WITH: 'WITH';
 YEAR: 'YEAR';
+//--SPARK-KEYWORD-LIST-END
 //============================
 // End of the keywords list
 //============================
@@ -1815,7 +1809,7 @@ fragment LETTER
     ;
 
 SIMPLE_COMMENT
-    : '--' ~[\r\n]* '\r'? '\n'? -> channel(HIDDEN)
+    : '--' ('\\\n' | ~[\r\n])* '\r'? '\n'? -> channel(HIDDEN)
     ;
 
 BRACKETED_COMMENT

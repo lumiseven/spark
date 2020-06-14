@@ -71,6 +71,8 @@ object RebaseDateTime {
     -719164, -682945, -646420, -609895, -536845, -500320, -463795,
     -390745, -354220, -317695, -244645, -208120, -171595, -141427)
 
+  final val lastSwitchJulianDay: Int = julianGregDiffSwitchDay.last
+
   // The first days of Common Era (CE) which is mapped to the '0001-01-01' date in Julian calendar.
   private final val julianCommonEraStartDay = julianGregDiffSwitchDay(0)
 
@@ -143,6 +145,8 @@ object RebaseDateTime {
     -719162, -682944, -646420, -609896, -536847, -500323, -463799, -390750,
     -354226, -317702, -244653, -208129, -171605, -141436, -141435, -141434,
     -141433, -141432, -141431, -141430, -141429, -141428, -141427)
+
+  final val lastSwitchGregorianDay: Int = gregJulianDiffSwitchDay.last
 
   // The first days of Common Era (CE) which is mapped to the '0001-01-01' date
   // in Proleptic Gregorian calendar.
@@ -284,6 +288,17 @@ object RebaseDateTime {
    */
   private val gregJulianRebaseMap = loadRebaseRecords("gregorian-julian-rebase-micros.json")
 
+  private def getLastSwitchTs(rebaseMap: AnyRefMap[String, RebaseInfo]): Long = {
+    val latestTs = rebaseMap.values.map(_.switches.last).max
+    require(rebaseMap.values.forall(_.diffs.last == 0),
+      s"Differences between Julian and Gregorian calendar after ${microsToInstant(latestTs)} " +
+      "are expected to be zero for all available time zones.")
+    latestTs
+  }
+  // The switch time point after which all diffs between Gregorian and Julian calendars
+  // across all time zones are zero
+  final val lastSwitchGregorianTs: Long = getLastSwitchTs(gregJulianRebaseMap)
+
   private final val gregorianStartTs = LocalDateTime.of(gregorianStartDate, LocalTime.MIDNIGHT)
   private final val julianEndTs = LocalDateTime.of(
     julianEndDate,
@@ -311,20 +326,34 @@ object RebaseDateTime {
    */
   private[sql] def rebaseGregorianToJulianMicros(zoneId: ZoneId, micros: Long): Long = {
     val instant = microsToInstant(micros)
-    var ldt = instant.atZone(zoneId).toLocalDateTime
+    val zonedDateTime = instant.atZone(zoneId)
+    var ldt = zonedDateTime.toLocalDateTime
     if (ldt.isAfter(julianEndTs) && ldt.isBefore(gregorianStartTs)) {
       ldt = LocalDateTime.of(gregorianStartDate, ldt.toLocalTime)
     }
     val cal = new Calendar.Builder()
-      // `gregory` is a hybrid calendar that supports both
-      // the Julian and Gregorian calendar systems
+      // `gregory` is a hybrid calendar that supports both the Julian and Gregorian calendar systems
       .setCalendarType("gregory")
       .setDate(ldt.getYear, ldt.getMonthValue - 1, ldt.getDayOfMonth)
       .setTimeOfDay(ldt.getHour, ldt.getMinute, ldt.getSecond)
-      // Local time-line can overlaps, such as at an autumn daylight savings cutover.
-      // This setting selects the original local timestamp mapped to the given `micros`.
-      .set(Calendar.DST_OFFSET, zoneId.getRules.getDaylightSavings(instant).toMillis.toInt)
       .build()
+    // A local timestamp can have 2 instants in the cases of switching from:
+    //  1. Summer to winter time.
+    //  2. One standard time zone to another one. For example, Asia/Hong_Kong switched from JST
+    //     to HKT on 18 November, 1945 01:59:59 AM.
+    // Below we check that the original `instant` is earlier or later instant. If it is an earlier
+    // instant, we take the standard and DST offsets of the previous day otherwise of the next one.
+    val trans = zoneId.getRules.getTransition(ldt)
+    if (trans != null && trans.isOverlap) {
+      val cloned = cal.clone().asInstanceOf[Calendar]
+      // Does the current offset belong to the offset before the transition.
+      // If so, we will take zone offsets from the previous day otherwise from the next day.
+      // This assumes that transitions cannot happen often than once per 2 days.
+      val shift = if (trans.getOffsetBefore == zonedDateTime.getOffset) -1 else 1
+      cloned.add(Calendar.DAY_OF_MONTH, shift)
+      cal.set(Calendar.ZONE_OFFSET, cloned.get(Calendar.ZONE_OFFSET))
+      cal.set(Calendar.DST_OFFSET, cloned.get(Calendar.DST_OFFSET))
+    }
     millisToMicros(cal.getTimeInMillis) + ldt.get(ChronoField.MICRO_OF_SECOND)
   }
 
@@ -342,13 +371,17 @@ object RebaseDateTime {
    * @return The rebased microseconds since the epoch in Julian calendar.
    */
   def rebaseGregorianToJulianMicros(micros: Long): Long = {
-    val timeZone = TimeZone.getDefault
-    val tzId = timeZone.getID
-    val rebaseRecord = gregJulianRebaseMap.getOrNull(tzId)
-    if (rebaseRecord == null || micros < rebaseRecord.switches(0)) {
-      rebaseGregorianToJulianMicros(timeZone.toZoneId, micros)
+    if (micros >= lastSwitchGregorianTs) {
+      micros
     } else {
-      rebaseMicros(rebaseRecord, micros)
+      val timeZone = TimeZone.getDefault
+      val tzId = timeZone.getID
+      val rebaseRecord = gregJulianRebaseMap.getOrNull(tzId)
+      if (rebaseRecord == null || micros < rebaseRecord.switches(0)) {
+        rebaseGregorianToJulianMicros(timeZone.toZoneId, micros)
+      } else {
+        rebaseMicros(rebaseRecord, micros)
+      }
     }
   }
 
@@ -416,6 +449,10 @@ object RebaseDateTime {
   // in the interval: [julianGregDiffSwitchMicros(i), julianGregDiffSwitchMicros(i+1))
   private val julianGregRebaseMap = loadRebaseRecords("julian-gregorian-rebase-micros.json")
 
+  // The switch time point after which all diffs between Julian and Gregorian calendars
+  // across all time zones are zero
+  final val lastSwitchJulianTs: Long = getLastSwitchTs(julianGregRebaseMap)
+
   /**
    * An optimized version of [[rebaseJulianToGregorianMicros(ZoneId, Long)]]. This method leverages
    * the pre-calculated rebasing maps to save calculation. If the rebasing map doesn't contain
@@ -430,13 +467,17 @@ object RebaseDateTime {
    * @return The rebased microseconds since the epoch in Proleptic Gregorian calendar.
    */
   def rebaseJulianToGregorianMicros(micros: Long): Long = {
-    val timeZone = TimeZone.getDefault
-    val tzId = timeZone.getID
-    val rebaseRecord = julianGregRebaseMap.getOrNull(tzId)
-    if (rebaseRecord == null || micros < rebaseRecord.switches(0)) {
-      rebaseJulianToGregorianMicros(timeZone.toZoneId, micros)
+    if (micros >= lastSwitchJulianTs) {
+      micros
     } else {
-      rebaseMicros(rebaseRecord, micros)
+      val timeZone = TimeZone.getDefault
+      val tzId = timeZone.getID
+      val rebaseRecord = julianGregRebaseMap.getOrNull(tzId)
+      if (rebaseRecord == null || micros < rebaseRecord.switches(0)) {
+        rebaseJulianToGregorianMicros(timeZone.toZoneId, micros)
+      } else {
+        rebaseMicros(rebaseRecord, micros)
+      }
     }
   }
 }
