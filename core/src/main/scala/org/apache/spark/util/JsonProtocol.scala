@@ -328,12 +328,12 @@ private[spark] object JsonProtocol {
     ("Accumulables" -> accumulablesToJson(taskInfo.accumulables))
   }
 
-  private lazy val accumulableBlacklist = Set("internal.metrics.updatedBlockStatuses")
+  private lazy val accumulableExcludeList = Set("internal.metrics.updatedBlockStatuses")
 
   def accumulablesToJson(accumulables: Iterable[AccumulableInfo]): JArray = {
     JArray(accumulables
-        .filterNot(_.name.exists(accumulableBlacklist.contains))
-        .toList.map(accumulableInfoToJson))
+        .filterNot(_.name.exists(accumulableExcludeList.contains))
+        .toList.sortBy(_.id).map(accumulableInfoToJson))
   }
 
   def accumulableInfoToJson(accumulableInfo: AccumulableInfo): JValue = {
@@ -757,7 +757,7 @@ private[spark] object JsonProtocol {
 
   def taskResourceRequestMapFromJson(json: JValue): Map[String, TaskResourceRequest] = {
     val jsonFields = json.asInstanceOf[JObject].obj
-    jsonFields.map { case JField(k, v) =>
+    jsonFields.collect { case JField(k, v) =>
       val req = taskResourceRequestFromJson(v)
       (k, req)
     }.toMap
@@ -765,7 +765,7 @@ private[spark] object JsonProtocol {
 
   def executorResourceRequestMapFromJson(json: JValue): Map[String, ExecutorResourceRequest] = {
     val jsonFields = json.asInstanceOf[JObject].obj
-    jsonFields.map { case JField(k, v) =>
+    jsonFields.collect { case JField(k, v) =>
       val req = executorResourceRequestFromJson(v)
       (k, req)
     }.toMap
@@ -1078,7 +1078,14 @@ private[spark] object JsonProtocol {
         val blockManagerAddress = blockManagerIdFromJson(json \ "Block Manager Address")
         val shuffleId = (json \ "Shuffle ID").extract[Int]
         val mapId = (json \ "Map ID").extract[Long]
-        val mapIndex = (json \ "Map Index").extract[Int]
+        val mapIndex = json \ "Map Index" match {
+          case JNothing =>
+            // Note, we use the invalid value Int.MinValue here to fill the map index for backward
+            // compatibility. Otherwise, the fetch failed event will be dropped when the history
+            // server loads the event log written by the Spark version before 3.0.
+            Int.MinValue
+          case x => x.extract[Int]
+        }
         val reduceId = (json \ "Reduce ID").extract[Int]
         val message = jsonOption(json \ "Message").map(_.extract[String])
         new FetchFailed(blockManagerAddress, shuffleId, mapId, mapIndex, reduceId,
@@ -1207,7 +1214,8 @@ private[spark] object JsonProtocol {
       case Some(id) => id.extract[Int]
       case None => ResourceProfile.DEFAULT_RESOURCE_PROFILE_ID
     }
-    new ExecutorInfo(executorHost, totalCores, logUrls, attributes, resources, resourceProfileId)
+    new ExecutorInfo(executorHost, totalCores, logUrls, attributes.toMap, resources.toMap,
+      resourceProfileId)
   }
 
   def blockUpdatedInfoFromJson(json: JValue): BlockUpdatedInfo = {
@@ -1221,7 +1229,7 @@ private[spark] object JsonProtocol {
 
   def resourcesMapFromJson(json: JValue): Map[String, ResourceInformation] = {
     val jsonFields = json.asInstanceOf[JObject].obj
-    jsonFields.map { case JField(k, v) =>
+    jsonFields.collect { case JField(k, v) =>
       val resourceInfo = ResourceInformation.parseJson(v)
       (k, resourceInfo)
     }.toMap
@@ -1233,7 +1241,7 @@ private[spark] object JsonProtocol {
 
   def mapFromJson(json: JValue): Map[String, String] = {
     val jsonFields = json.asInstanceOf[JObject].obj
-    jsonFields.map { case JField(k, JString(v)) => (k, v) }.toMap
+    jsonFields.collect { case JField(k, JString(v)) => (k, v) }.toMap
   }
 
   def propertiesFromJson(json: JValue): Properties = {

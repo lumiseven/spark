@@ -354,6 +354,7 @@ object FunctionRegistry {
     expression[StringLocate]("position", true),
     expression[FormatString]("printf", true),
     expression[RegExpExtract]("regexp_extract"),
+    expression[RegExpExtractAll]("regexp_extract_all"),
     expression[RegExpReplace]("regexp_replace"),
     expression[StringRepeat]("repeat"),
     expression[StringReplace]("replace"),
@@ -390,6 +391,7 @@ object FunctionRegistry {
     expression[AddMonths]("add_months"),
     expression[CurrentDate]("current_date"),
     expression[CurrentTimestamp]("current_timestamp"),
+    expression[CurrentTimeZone]("current_timezone"),
     expression[DateDiff]("datediff"),
     expression[DateAdd]("date_add"),
     expression[DateFormatClass]("date_format"),
@@ -425,9 +427,14 @@ object FunctionRegistry {
     expression[MakeInterval]("make_interval"),
     expression[DatePart]("date_part"),
     expression[Extract]("extract"),
+    expression[DateFromUnixDate]("date_from_unix_date"),
+    expression[UnixDate]("unix_date"),
     expression[SecondsToTimestamp]("timestamp_seconds"),
     expression[MillisToTimestamp]("timestamp_millis"),
     expression[MicrosToTimestamp]("timestamp_micros"),
+    expression[UnixSeconds]("unix_seconds"),
+    expression[UnixMillis]("unix_millis"),
+    expression[UnixMicros]("unix_micros"),
 
     // collection functions
     expression[CreateArray]("array"),
@@ -478,6 +485,7 @@ object FunctionRegistry {
 
     // misc functions
     expression[AssertTrue]("assert_true"),
+    expression[RaiseError]("raise_error"),
     expression[Crc32]("crc32"),
     expression[Md5]("md5"),
     expression[Uuid]("uuid"),
@@ -509,6 +517,7 @@ object FunctionRegistry {
     expression[Lag]("lag"),
     expression[RowNumber]("row_number"),
     expression[CumeDist]("cume_dist"),
+    expression[NthValue]("nth_value"),
     expression[NTile]("ntile"),
     expression[Rank]("rank"),
     expression[DenseRank]("dense_rank"),
@@ -660,7 +669,7 @@ object FunctionRegistry {
     val clazz = scala.reflect.classTag[Cast].runtimeClass
     val usage = "_FUNC_(expr) - Casts the value `expr` to the target data type `_FUNC_`."
     val expressionInfo =
-      new ExpressionInfo(clazz.getCanonicalName, null, name, usage, "", "", "", "", "", "")
+      new ExpressionInfo(clazz.getCanonicalName, null, name, usage, "", "", "", "", "2.0.1", "")
     (name, (expressionInfo, builder))
   }
 

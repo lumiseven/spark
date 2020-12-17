@@ -70,7 +70,7 @@ function stageEndPoint(appId) {
             return newBaseURI + "/api/v1/applications/" + appId + "/" + appAttemptId + "/stages/" + stageId;
         }
     }
-    return location.origin + "/api/v1/applications/" + appId + "/stages/" + stageId;
+    return uiRoot + "/api/v1/applications/" + appId + "/stages/" + stageId;
 }
 
 function getColumnNameForTaskMetricSummary(columnKey) {
@@ -433,7 +433,7 @@ $(document).ready(function () {
                         {data : "failedTasks"},
                         {data : "killedTasks"},
                         {data : "succeededTasks"},
-                        {data : "isBlacklistedForStage"},
+                        {data : "isExcludedForStage"},
                         {
                             data : function (row, type) {
                                 return row.inputRecords != 0 ? formatBytes(row.inputBytes, type) + " / " + row.inputRecords : "";
